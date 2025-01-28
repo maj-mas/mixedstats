@@ -5,14 +5,14 @@ import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 
 def V(x, q):
-    return 1 / np.abs(x-q)
+    return 4 * (1 / np.abs(x-q)**12 - 1 / np.abs(x-q)**6)
 
 def main():
-    L = 1
+    L = 10
     m = 1
     N_C = 1
     N_Q = 1
-    G = 100 # 1d grid points
+    G = 200 # 1d grid points
     P_CUTOFF = 10 # !?
 
     xs = np.linspace(-L/2, L/2, G)
@@ -31,7 +31,7 @@ def main():
         for x in xs:
             energies_given_xp[(x,p)] = energies_given_x[x] + p**2/(2*m)
 
-    betas = np.linspace(0, 10, 100)
+    betas = np.logspace(10, 0, 100)
     Z = np.zeros(100)
 
     for i, beta in tqdm(enumerate(betas)):
@@ -43,6 +43,7 @@ def main():
     ax.plot(betas, Z)
     ax.set_yscale("log")
     ax.set_xscale("log")
+    #ax.set_ylim(1e-3, 1e8)
     fig.savefig("test.pdf")
 
 
