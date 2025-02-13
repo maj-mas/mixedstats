@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import seaborn as sns
+from tqdm.auto import tqdm
 
 # mpl defaults
 plt.rcParams.update({
@@ -46,6 +47,9 @@ def C_N(alpha, beta): # specific heat per particle
     return (1 - alpha) / 2 + alpha * beta**2 * q * ( \
         q * (th3(q)*th3_pp(q) - th3_p(q)**2)/th3(q)**2 + th3_p(q)/th3(q) )
 
+def p_N(alpha, beta, L):
+    return (1 - alpha) / (beta * L) + alpha * 0.5 / L**3 * th3_p(np.exp(-beta))/th3(np.exp(-beta)) * np.exp(-beta)
+
 def plot_thetas():
     xs = np.linspace(0, 1, 100)
     th    = np.vectorize(th3)((xs))
@@ -64,8 +68,8 @@ def plot_thetas():
     ax.grid()
 
     fig.tight_layout()
-    fig.savefig("theta.pdf")
-    fig.savefig("theta.png")
+    fig.savefig("../plots/free-mix/theta.pdf")
+    fig.savefig("../plots/free-mix/theta.png")
 
 def plot_F_T():
     Ts = np.linspace(1e-6, 3, 100)
@@ -91,8 +95,8 @@ def plot_F_T():
     ax.legend(loc="lower right")
 
     fig.tight_layout()
-    fig.savefig("freeerg.pdf")
-    fig.savefig("freeerg.png")
+    fig.savefig("../plots/free-mix/freeerg.pdf")
+    fig.savefig("../plots/free-mix/freeerg.png")
 
 def plot_F_alpha():
     Ts = np.array([1e-6, 1e-2, 1e-1, 0.5, 2])
@@ -112,8 +116,8 @@ def plot_F_alpha():
     ax.set_ylabel("$(F+ \\ln(\\alpha N)! + \\ln ((1-\\alpha)N)!)/N $ $(\\varepsilon)$")
     
     fig.tight_layout()
-    fig.savefig("freeerg_alpha.pdf")
-    fig.savefig("freeerg_alpha.png")
+    fig.savefig("../plots/free-mix/freeerg_alpha.pdf")
+    fig.savefig("../plots/free-mix/freeerg_alpha.png")
 
 def plot_C():
     Ts = np.linspace(1e-6, 3, 100)
@@ -139,8 +143,8 @@ def plot_C():
     ax.legend(loc="lower right")
 
     fig.tight_layout()
-    fig.savefig("C.pdf")
-    fig.savefig("C.png")
+    fig.savefig("../plots/free-mix/C.pdf")
+    fig.savefig("../plots/free-mix/C.png")
 
 def plot_C_alpha():
     Ts = np.array([1e-6, 1e-2, 1e-1, 0.5, 2])
@@ -160,15 +164,65 @@ def plot_C_alpha():
     ax.set_ylabel("$C_L/N$ $(\\varepsilon)$")
     
     fig.tight_layout()
-    fig.savefig("C_alpha.pdf")
-    fig.savefig("C_alpha.png")
+    fig.savefig("../plots/free-mix/C_alpha.pdf")
+    fig.savefig("../plots/free-mix/C_alpha.png")
+
+def plot_eos(alpha):
+    Ts = np.array([1e-6, 1e-2, 1e-1, 0.5, 2])
+    betas = 1 / Ts
+    Ls = np.logspace(-6, 2, 100)
+    p = np.vectorize(p_N)
+
+    fig, ax = plt.subplots()
+    for beta, T in tqdm(zip(betas, Ts)):
+        P = p(alpha, beta, Ls)
+        ax.plot(Ls, P, label=f"$T={T}$ $(\\varepsilon / k)$")
+    ax.grid()
+    ax.legend()
+    ax.set_xlabel("$L$")
+    ax.set_ylabel("$p/N$")
+    ax.set_yscale("log")
+    ax.set_xscale("log")
+    ax.set_title(f"$\\alpha={alpha}$")
+
+    fig.tight_layout()
+    fig.savefig(f"../plots/free-mix/eos/eos_alpha{alpha}.pdf")
+    fig.savefig(f"../plots/free-mix/eos/eos_alpha{alpha}.png")
+    
+def plot_eos_T(T):
+    alphas = np.linspace(0, 1, 6)
+    beta = 1 / T
+    Ls = np.logspace(-6, 2, 100)
+    p = np.vectorize(p_N)
+
+    fig, ax = plt.subplots()
+    for alpha in tqdm(alphas):
+        P = p(alpha, beta, Ls)
+        ax.plot(Ls, P, label=f"$\\alpha={alpha}$")
+    ax.grid()
+    ax.legend()
+    ax.set_xlabel("$L$")
+    ax.set_ylabel("$p/N$")
+    ax.set_yscale("log")
+    ax.set_xscale("log")
+    ax.set_title(f"$T={T}$ $\\varepsilon$")
+
+    fig.tight_layout()
+    fig.savefig(f"../plots/free-mix/eos/eos_T{T}.pdf")
+    fig.savefig(f"../plots/free-mix/eos/eos_T{T}.png")
 
 def main():
-    plot_thetas()
-    plot_F_T()
-    plot_F_alpha()
-    plot_C()
-    plot_C_alpha()
+    # plot_thetas()
+    # plot_F_T()
+    # plot_F_alpha()
+    # plot_C()
+    # plot_C_alpha()
+    
+    for alpha in [0, 0.1, 0.5, 0.9, 1]:
+        plot_eos(alpha)
+    for T in [1e-6, 1e-2, 1e-1, 0.5, 2]:
+        plot_eos_T(T)
+    
 
 if __name__ == "__main__":
     main()
