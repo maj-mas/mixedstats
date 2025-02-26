@@ -21,26 +21,31 @@ plt.rcParams.update({
 })
 sns.color_palette("colorblind")
 
-def i_s(x, n):
-    return np.exp(-np.sin(n*np.pi*x)**2)
+def i_s(x, beta, g):
+    return np.exp(-beta * g * np.sin(x)**2)
 
-def i_c(x, n):
-    return np.exp(-np.cos(n*np.pi*x)**2)
 
-ns = np.arange(1, 100)
-ints = []
-errs = []
-
-for n in tqdm(ns):
-    if n % 2 == 0:
-        i = lambda x: i_s(x, n)  
-    else: 
-        i = lambda x: i_c(x, n)
-    n_int, n_err = scpint.quad(i, -0.5, 0.5, limit=int(1e6))
-    ints.append(n_int)
-    errs.append(n_err)
+Ts = np.linspace(1e-6, 10, 1000)
+gs = [0.01, 0.1, 0.5, 1, 2, 5]
+betas = 1 / Ts
 
 fig, ax = plt.subplots()
-ax.plot(ns, ints)
+for g in gs:
+    ints = []
+    errs = []
+    for T in tqdm(Ts):
+        i = lambda x: i_s(x, 1/T, g)
+        n_int, n_err = scpint.quad(i, 0, np.pi, limit=int(1e6))
+        ints.append(1/np.pi * n_int)
+        errs.append(1/np.pi * n_err)
+    ax.plot(Ts, ints, label=f"$g={g}\\,\\varepsilon$")
 
+ax.set_xlabel("$T$ $(\\varepsilon)$")
+ax.set_ylabel("$I(\\beta)$ $(L)$")
+ax.set_xlim(0, 10)
+ax.set_ylim(0, 1)
+ax.grid()
+ax.legend(loc="lower right")
+
+fig.tight_layout()
 fig.savefig("expsinint.pdf")
