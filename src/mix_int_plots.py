@@ -2,13 +2,15 @@
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 import seaborn as sns
 from tqdm.auto import tqdm
 import scipy.integrate as scpint
 import scipy.optimize as scpopt
 from numba import njit, prange
 import pandas as pd
-from multiprocessing import Pool
+from multiprocessing import Pool, pool, TimeoutError
+import time
 
 
 # mpl defaults
@@ -94,8 +96,8 @@ def p(beta, g, L, alpha):
 
 @njit(parallel=True)
 def Zs():
-    Ts = np.linspace(1e-6, 5, 200)
-    gs = [0.01, 0.1, 0.5, 1.0, 2.0, 5.0]
+    Ts = np.linspace(1e-6, 5, 100)
+    gs = [0.01, 0.1, 0.5, 1.0, 2.0]
     Zc1_L = np.empty((len(Ts), len(gs)), dtype=np.double)
     Zc2_L2 = np.empty((len(Ts), len(gs)), dtype=np.double)
     Zq1 = np.empty((len(Ts), len(gs)), dtype=np.double)
@@ -137,25 +139,60 @@ def Zqc():
 def fug_eqn(z, alpha, n, L, a, b, c, d, f):
     f1 = (1 - alpha)/alpha - (a*z[0] + (2*c*L - a**2*L)*z[0]**2 - (a*b + f/L)*z[0]*z[1]) / (b/L*z[1] - (2*d/L - b**2/L**2)*z[1]**2 - (a*b + f/L)*z[0]*z[1])
     f2 = n - (a*z[0] + (2*c*L - a**2*L)*z[0]**2 + b/L*z[1] + (2*d/L - b**2/L)*z[1]**2 - 2*(a*b + f)*z[0]*z[1])
-    return np.array([f1, f2])
+    return f1**2 + f2**2
 
-def mus(Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L):
-    Ts = np.linspace(1e-6, 5, 200)
-    gs = [0.01, 0.1, 0.5, 1.0, 2.0, 5.0]
-    Ls = np.logspace(-6, 2, 100)
+finish_count = 0
+needed = 100 * 5 * 50 * 6 * 6
+def fugs(Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L):
+    global finish_count, needed
+    Ts = np.linspace(1e-6, 5, 100)
+    gs = [0.01, 0.1, 0.5, 1.0, 2.0]
+    Ls = np.logspace(-6, 1, 50)
     alphas = np.linspace(1e-6, 1, 6)
-    ns = np.logspace(10, 25, 8)
+    ns = np.logspace(10, 20, 6)
 
     fugs_c = np.empty((len(Ts), len(gs), len(Ls), len(alphas), len(ns)))
     fugs_q = np.empty((len(Ts), len(gs), len(Ls), len(alphas), len(ns)))
-    z0 = np.array([0.01, -0.01])
-    for i, T in tqdm(enumerate(Ts)):
-        for j, g in enumerate(gs):
-            for k, L in enumerate(Ls):
-                for l, alpha in enumerate(alphas):
-                    for m, n in enumerate(ns):
-                        fugs_c[i, j, k, l, m], fugs_q[i, j, k, l, m] = scpopt.fsolve(fug_eqn, z0, args=(alpha, n, L, Zc1_L[i, j], Zq1[i, j], Zc2_L2[i, j], Zq2[i, j], Zqc2_L[i, j]))
+    z0 = np.array([1.0, 1.0])
 
+    finish_count = 0
+    def progress(results):
+        global finish_count, needed
+        if finish_count % 1000 == 0:
+            print(f"{finish_count/needed}", end="\r")
+        finish_count += 1
+
+    promises = [[[[[[] for m in range(len(ns))] for l in range(len(alphas))] for k in range(len(Ls))] for j in range(len(gs))] for i in range(len(Ts))]
+    with Pool(processes=20) as procs:
+        for i, T in enumerate(Ts):
+            for j, g in enumerate(gs):
+                for k, L in enumerate(Ls):
+                    for l, alpha in enumerate(alphas):
+                        for m, n in enumerate(ns):
+                            promises[i][j][k][l][m] = procs.apply_async(
+                                scpopt.minimize, 
+                                (fug_eqn, z0), 
+                                dict(bounds=[(1e-16, None), (1e-16, None)], args=(alpha, n, L, Zc1_L[i, j], Zq1[i, j], Zc2_L2[i, j], Zq2[i, j], Zqc2_L[i, j]), jac="3-point"),      
+                                callback=progress                          
+                            )
+        
+        procs.close()     
+        
+        #time.sleep(6)      
+
+        for i, T in tqdm(enumerate(Ts)):
+                for j, g in enumerate(gs):
+                    for k, L in enumerate(Ls):
+                        for l, alpha in enumerate(alphas):
+                            for m, n in enumerate(ns):
+                                try:
+                                    fugs_c[i, j, k, l, m], fugs_q[i, j, k, l, m] = promises[i][j][k][l][m].get().x
+                                except TimeoutError:
+                                    #print("missing sol")
+                                    fugs_c[i, j, k, l, m], fugs_q[i, j, k, l, m] = [np.nan, np.nan]
+
+        procs.join()
+    
     return fugs_c, fugs_q
 
 @njit
@@ -186,7 +223,7 @@ def load_zs():
 
 def save_fugs():
     Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L = load_zs()
-    fugs_c, fugs_q = mus(Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L)
+    fugs_c, fugs_q = fugs(Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L)
     np.save("fugs_c.npy", fugs_c)
     np.save("fugs_q.npy", fugs_q)
 
@@ -196,11 +233,11 @@ def load_fugs():
     return fugs_c, fugs_q
 
 def save_ps():
-    Ts = np.linspace(1e-6, 5, 200)
-    gs = [0.01, 0.1, 0.5, 1.0, 2.0, 5.0]
-    Ls = np.logspace(-6, 2, 100)
+    Ts = np.linspace(1e-6, 5, 100)
+    gs = [0.01, 0.1, 0.5, 1.0, 2.0]
+    Ls = np.logspace(-6, 1, 50)
     alphas = np.linspace(1e-6, 1, 6)
-    ns = np.logspace(10, 25, 8)
+    ns = np.logspace(10, 20, 6)
     Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L = load_zs()
     fugs_c, fugs_q = load_fugs()
 
@@ -225,10 +262,54 @@ def save_ps():
     
 
 def plot_mus():
-    ...
+    Ts = np.linspace(1e-6, 5, 100)
+    gs = [0.01, 0.1, 0.5, 1.0, 2.0]
+    Ls = np.logspace(-6, 1, 50)
+    alphas = np.linspace(1e-6, 1, 6)
+    ns = np.logspace(10, 20, 6)
+    fugs_c, fugs_q = load_fugs()
+    
+    mus_c = np.empty((len(Ts), len(gs), len(Ls), len(alphas), len(ns)))
+    mus_q = np.empty((len(Ts), len(gs), len(Ls), len(alphas), len(ns)))
+    for i, T in enumerate(Ts):
+        mus_c[i, ...] = np.log(fugs_c[i, ...]) / Ts[i]
+        mus_q[i, ...] = np.log(fugs_q[i, ...]) / Ts[i]
+
+    rng = np.random.default_rng()
+    random_g_is = rng.integers(len(gs), high=None, size=2)
+    random_alpha_is = rng.integers(len(alphas), high=None, size=2)
+    random_n_is = rng.integers(len(ns), high=None, size=2)
+    for j in random_g_is:
+        g = gs[j]
+        for l in random_alpha_is:
+            alpha = alphas[l]
+            for m in random_n_is:
+                n = ns[m]
+                level_min = min(np.nanmin(fugs_c[:, j, :, l, m]), np.nanmin(fugs_q[:, j, :, l, m]))
+                level_max = max(np.nanmax(fugs_c[:, j, :, l, m]), np.nanmax(fugs_q[:, j, :, l, m]))
+                #levels_exp = np.arange(np.floor(np.log10(level_min)-1), np.ceil(np.log10(level_max)+1))
+                #levels = np.power(10, levels_exp)
+                levels = np.linspace(level_min, level_max+1e-6, 100)
+                fig, [c_ax, q_ax] = plt.subplots(nrows=1, ncols=2, sharey=True, squeeze=True)
+                cfc = c_ax.contourf(Ts, Ls, fugs_c[:, j, :, l, m].T, levels=levels)#, norm=LogNorm())
+                cfq = q_ax.contourf(Ts, Ls, fugs_q[:, j, :, l, m].T, levels=levels)#, norm=LogNorm())
+                c_ax.set_xlabel("$T$ $(\\varepsilon)$")
+                c_ax.set_yscale("log")
+                q_ax.set_xlabel("$T$ $(\\varepsilon)$")
+                c_ax.set_ylabel("$L$")
+                c_ax.set_title("$z_\\text{c}$")
+                q_ax.set_title("$z_\\text{q}$")
+                fig.colorbar(cfq, cax=None, label="$z$")
+                fig.suptitle(f"$g={g}\\,\\varepsilon$, $\\alpha={alpha}$, $n={np.format_float_scientific(n, precision=3)}/L$")
+
+                fig.savefig(f"../plots/int-mix/mus/fug_g{g}_alpha{alpha}_n{n}.pdf")
+                plt.close(fig)
+        
 
 def plot_ps():
     ...
 
-#save_fugs()
-#save_ps()
+# save_zs()
+# save_fugs()
+# save_ps()
+plot_mus()
