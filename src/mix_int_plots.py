@@ -96,7 +96,7 @@ def p(beta, g, L, alpha):
 
 @njit(parallel=True)
 def Zs():
-    Ts = np.linspace(1e-6, 5, 100)
+    Ts = np.linspace(1e-6, 5, 50)
     gs = [0.01, 0.1, 0.5, 1.0, 2.0]
     Zc1_L = np.empty((len(Ts), len(gs)), dtype=np.double)
     Zc2_L2 = np.empty((len(Ts), len(gs)), dtype=np.double)
@@ -137,25 +137,33 @@ def Zqc():
 
 @njit
 def fug_eqn(z, alpha, n, L, a, b, c, d, f):
+    lambda_l2 = 0.001
     f1 = n*(1-alpha) - (a*z[0] + (2*c*L - a**2*L)*z[0]**2 - (a*b + f)*z[0]*z[1])
     f2 = alpha*n - (b/L*z[1] + (2*d/L - b**2/L)*z[1]**2 - (a*b + f)*z[0]*z[1])
-    return np.array([f1, f2])
-    #return f1**2 + f2**2·
+
+    objective = f1**2 + f2**2 + lambda_l2 * (z[0]**2 + z[1]**2) # l2 regularisation
+
+    grad = np.empty((2))
+    grad[0] = 2 * lambda_l2 * z[0] - 2 * f1 * (a + 2*(2*c*L - a**2*L)*z[0] - (a*b + f)*z[1]) + 2 * f2 * (a*b + f)*z[1]
+    grad[1] = 2 * lambda_l2 * z[1] + 2 * f1 * ((a*b + f)*z[0]) - 2 * f2 * (b/L + 2*(2*d/L - b**2/L)*z[1] - (a*b + f)*z[0])
+
+    # return np.array([f1, f2])
+    return objective, grad
 
 finish_count = 0
-needed = 100 * 5 * 50 * 6 * 6
+needed = 50 * 5 * 20 * 6 * 6
 def fugs(Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L):
     global finish_count, needed
-    Ts = np.linspace(1e-6, 5, 100)
+    Ts = np.linspace(1e-6, 5, 50)
     gs = [0.01, 0.1, 0.5, 1.0, 2.0]
-    Ls = np.logspace(-6, 1, 50)
+    Ls = np.logspace(-6, 1, 20)
     alphas = np.linspace(1e-6, 1, 6)
     ns = np.logspace(10, 20, 6)
 
     fugs_c = np.empty((len(Ts), len(gs), len(Ls), len(alphas), len(ns)))
     fugs_q = np.empty((len(Ts), len(gs), len(Ls), len(alphas), len(ns)))
     errs = np.empty((len(Ts), len(gs), len(Ls), len(alphas), len(ns)))
-    z0 = np.array([0, 0])
+    z0 = np.array([0.01, 0.01])
 
     finish_count = 0
     def progress(results):
@@ -165,16 +173,16 @@ def fugs(Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L):
         finish_count += 1
 
     promises = [[[[[[] for m in range(len(ns))] for l in range(len(alphas))] for k in range(len(Ls))] for j in range(len(gs))] for i in range(len(Ts))]
-    with Pool(processes=20) as procs:
+    with Pool(processes=8) as procs:
         for i, T in enumerate(Ts):
             for j, g in enumerate(gs):
                 for k, L in enumerate(Ls):
                     for l, alpha in enumerate(alphas):
                         for m, n in enumerate(ns):
                             promises[i][j][k][l][m] = procs.apply_async(
-                                scpopt.root, 
+                                scpopt.minimize, 
                                 (fug_eqn, z0), 
-                                dict(args=(alpha, n, L, Zc1_L[i, j], Zq1[i, j], Zc2_L2[i, j], Zq2[i, j], Zqc2_L[i, j])),      
+                                dict(jac=True, bounds=[(1e-10, None), (1e-10, None)], args=(alpha, n, L, Zc1_L[i, j], Zq1[i, j], Zc2_L2[i, j], Zq2[i, j], Zqc2_L[i, j])),      
                                 callback=progress                          
                             )
         
@@ -190,7 +198,8 @@ def fugs(Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L):
                                 try:
                                     z_vec = promises[i][j][k][l][m].get().x
                                     fugs_c[i, j, k, l, m], fugs_q[i, j, k, l, m] = z_vec
-                                    errs[i, j, k, l, m] = np.linalg.norm(fug_eqn(z_vec, alpha, n, L, Zc1_L[i, j], Zq1[i, j], Zc2_L2[i, j], Zq2[i, j], Zqc2_L[i, j]))
+                                    sol_test, grad = fug_eqn(z_vec, alpha, n, L, Zc1_L[i, j], Zq1[i, j], Zc2_L2[i, j], Zq2[i, j], Zqc2_L[i, j])
+                                    errs[i, j, k, l, m] = sol_test - 0.001 * np.linalg.norm(z_vec)**2
                                 except TimeoutError:
                                     #print("missing sol")
                                     fugs_c[i, j, k, l, m], fugs_q[i, j, k, l, m] = [np.nan, np.nan]
@@ -200,13 +209,10 @@ def fugs(Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L):
     return fugs_c, fugs_q, errs
 
 @njit
-def p_eos(beta, z, n, L, a, b, c, d, f):
-    return 1/beta * (
-          n/beta 
-        - 0.5*(2*c - a**2)*z[0]**2 * L**2
-        - 0.5*(2*d - b**2)*z[1]**2
-        + (a*b + f)*z[0]*z[1] * L
-    )
+def p_eos(beta, alpha, n, L, a, b, c, d, f):
+    zc = (1-alpha) * n * L * (alpha/(1-alpha)**2 / f - b * f * (f + a)/(f**2 - a*b))
+    zq = (a-alpha) * n * L * (f + a)/(f**2 - a*b)
+    return 1/(beta) * (a*zc + b/L*zq + 0.5*(2*c*L - a*L**2)*zc**2 + 0.5*(2*d/L - b**2/L)*zq**2 - (a*b + f)*zc*zq) # factors 1/L distributed
 
 def save_zs():
     Zc1_L, Zc2_L2, Zq1, Zq2 = Zs()
@@ -239,13 +245,13 @@ def load_fugs():
     return fugs_c, fugs_q, errs
 
 def save_ps():
-    Ts = np.linspace(1e-6, 5, 100)
+    Ts = np.linspace(1e-6, 5, 50)
     gs = [0.01, 0.1, 0.5, 1.0, 2.0]
-    Ls = np.logspace(-6, 1, 50)
+    Ls = np.logspace(-6, 1, 20)
     alphas = np.linspace(1e-6, 1, 6)
     ns = np.logspace(10, 20, 6)
     Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L = load_zs()
-    fugs_c, fugs_q = load_fugs()
+    #fugs_c, fugs_q = load_fugs()
 
     ps = np.empty((len(Ts), len(gs), len(Ls), len(alphas), len(ns)))
 
@@ -254,8 +260,9 @@ def save_ps():
             for k, L in enumerate(Ls):
                 for l, alpha in enumerate(alphas):
                     for m, n in enumerate(ns):
-                        ps[i, j, k, l, m] = p_eos(1/T, 
-                                                  [fugs_c[i, j, k, l, m], fugs_q[i, j, k, l, m]],
+                        try:
+                            ps[i, j, k, l, m] = p_eos(1/T, 
+                                                  alpha,
                                                   n,
                                                   L,
                                                   Zc1_L[i, j],
@@ -263,14 +270,19 @@ def save_ps():
                                                   Zc2_L2[i, j],
                                                   Zq2[i, j],
                                                   Zqc2_L[i, j])
+                        except:                            
+                            ps[i, j, k, l, m] = np.nan
     
     np.save("ps.npy", ps)
+
+def load_ps():
+    return np.load("ps.npy")
     
 
 def plot_mus():
-    Ts = np.linspace(1e-6, 5, 100)
+    Ts = np.linspace(1e-6, 5, 50)
     gs = [0.01, 0.1, 0.5, 1.0, 2.0]
-    Ls = np.logspace(-6, 1, 50)
+    Ls = np.logspace(-6, 1, 20)
     alphas = np.linspace(1e-6, 1, 6)
     ns = np.logspace(10, 20, 6)
     fugs_c, fugs_q, errs = load_fugs()
@@ -293,12 +305,12 @@ def plot_mus():
                 n = ns[m]
                 level_min = min(np.nanmin(fugs_c[:, j, :, l, m]), np.nanmin(fugs_q[:, j, :, l, m]))
                 level_max = max(np.nanmax(fugs_c[:, j, :, l, m]), np.nanmax(fugs_q[:, j, :, l, m]))
-                #levels_exp = np.arange(np.floor(np.log10(level_min)-1), np.ceil(np.log10(level_max)+1), step=0.1)
-                #levels = np.power(10, levels_exp)
-                levels = np.linspace(level_min, level_max+1e-6, 100)
+                levels_exp = np.arange(np.floor(np.log10(level_min)-1), np.ceil(np.log10(level_max)+1), step=0.1)
+                levels = np.power(10, levels_exp)
+                #levels = np.linspace(level_min, level_max+1e-6, 100)
                 fig, [c_ax, q_ax, cb1,  err_ax, cb2] = plt.subplots(figsize=(12, 6), nrows=1, ncols=5, squeeze=True, width_ratios=(1, 1, 0.3, 1, 0.3))
-                cfc = c_ax.contourf(Ts, Ls, fugs_c[:, j, :, l, m].T, levels=levels)#, norm=LogNorm())
-                cfq = q_ax.contourf(Ts, Ls, fugs_q[:, j, :, l, m].T, levels=levels)#, norm=LogNorm())
+                cfc = c_ax.contourf(Ts, Ls, fugs_c[:, j, :, l, m].T, levels=levels, norm=LogNorm())
+                cfq = q_ax.contourf(Ts, Ls, fugs_q[:, j, :, l, m].T, levels=levels, norm=LogNorm())
                 fig.colorbar(cfq, cax=cb1, label="$z$", fraction=0.4)
                 errfq = err_ax.contourf(Ts, Ls, np.abs(errs[:, j, :, l, m].T))
                 fig.colorbar(errfq, cax=cb2, label="$f(z)\\overset{!}{=}0$", fraction=0.4)
@@ -317,15 +329,54 @@ def plot_mus():
                 err_ax.set_ylim(1e-6, 10)
                 fig.suptitle(f"$g={g}\\,\\varepsilon$, $\\alpha={alpha}$, $n={np.format_float_scientific(n, precision=3)}/L$")
 
-                fig.tight_layout()
+                #fig.tight_layout()
                 fig.savefig(f"../plots/int-mix/mus/fug_g{g}_alpha{alpha}_n{n}.pdf")
                 plt.close(fig)
         
 
 def plot_ps():
-    ...
+    Ts = np.linspace(1e-6, 5, 50)
+    gs = [0.01, 0.1, 0.5, 1.0, 2.0]
+    Ls = np.logspace(-6, 1, 20)
+    alphas = np.linspace(1e-6, 1, 6)
+    ns = np.logspace(10, 20, 6)
+    ps = load_ps()
+
+    rng = np.random.default_rng()
+    random_g_is = rng.integers(len(gs), high=None, size=2)
+    random_alpha_is = rng.integers(len(alphas), high=None, size=2)
+    random_n_is = rng.integers(len(ns), high=None, size=2)
+    for j in random_g_is:
+        g = gs[j]
+        for l in random_alpha_is:
+            alpha = alphas[l]
+            for m in random_n_is:
+                n = ns[m]
+                level_min = np.nanmin(ps[:, j, :, l, m])
+                level_max = np.nanmax(ps[:, j, :, l, m])
+                #levels_exp = np.arange(np.floor(np.log10(level_min)-1)-1, np.ceil(np.log10(level_max)+1)+1, step=0.1)
+                #levels = np.power(10, levels_exp)
+                levels = np.linspace(level_min, level_max, 100)
+
+                fig, ax = plt.subplots()
+                pcf = ax.contourf(Ts, Ls, ps[:, j, :, l, m].T, levels=levels)#, norm=LogNorm())
+                fig.colorbar(pcf, label="$p$ (?)")
+
+                ax.set_xlabel("$T$ $(\\varepsilon)$")
+                ax.set_yscale("log")
+                ax.set_xlabel("$T$ $(\\varepsilon)$")
+                ax.set_ylabel("$L$")
+                ax.set_xlim(0, 5)
+                ax.set_ylim(1e-6, 10)
+                fig.suptitle(f"$g={g}\\,\\varepsilon$, $\\alpha={alpha}$, $n={np.format_float_scientific(n, precision=3)}/L$")
+
+                #fig.tight_layout()
+                fig.savefig(f"../plots/int-mix/ps/p_g{g}_alpha{alpha}_n{n}.pdf")
+                plt.close(fig)
+
 
 # save_zs()
 # save_fugs()
 # save_ps()
-plot_mus()
+plot_ps()
+# plot_mus()
