@@ -11,6 +11,7 @@ from numba import njit, prange
 import pandas as pd
 from multiprocessing import Pool, pool, TimeoutError
 import time
+from mpmath import jtheta, diff
 
 
 # mpl defaults
@@ -36,17 +37,26 @@ sum_cutoff = 1e4 # may be to small but we need
 ns_sum = np.arange(1, sum_cutoff, 1)
 ns_sum_sq = ns_sum ** 2
 
-@njit
+# @njit
+# def th3(x):
+#     return 1.0 + 2 * np.sum(x ** ns_sum_sq)
+
+# @njit
+# def th3_p(x):
+#     return 2 * np.sum(ns_sum_sq * x ** (ns_sum_sq - 1))
+
+# @njit
+# def th3_pp(x):
+#     return 2* np.sum(ns_sum_sq * (ns_sum_sq - 1) * x ** (ns_sum_sq - 2))
+
 def th3(x):
-    return 1.0 + np.sum(x ** ns_sum_sq)
+    return float(jtheta(3, 0, x))
 
-@njit
 def th3_p(x):
-    return np.sum(ns_sum_sq * x ** (ns_sum_sq - 1))
+    return float(diff(lambda x: jtheta(3, 0, x), x))
 
-@njit
 def th3_pp(x):
-    return np.sum(ns_sum_sq * (ns_sum_sq - 1) * x ** (ns_sum_sq - 2))
+    return float(diff(lambda x: jtheta(3, 0, x), x, 2))
 
 @njit
 def i_s(x, beta, g):
@@ -68,11 +78,11 @@ def V(g, n1, n2): # yikes
 
 #@njit
 def Z_qc_2_L(beta, g): # Z divided by L!
-    return np.sqrt(1/(4*beta)) / np.pi * th3(np.exp(-beta)) * I(beta, g)
+    return np.sqrt(1/(4*beta)) / np.pi * 0.5 * (th3(np.exp(-beta)) - 1) * I(beta, g)
 
-@njit
+#@njit
 def Z_q_1(beta):
-    return th3(np.exp(-beta))
+    return 0.5 * (th3(np.exp(-beta)) - 1)
 
 @njit
 def Z_c_1_L(beta): # Z divided by L!
@@ -90,17 +100,13 @@ def Z_q_2(beta, g):
 def Z_c_2_L2(beta): # Z divided by L^2 !
     return 2/(4*beta)
 
-@njit
-def p(beta, g, L, alpha):
-    ...
 
 @njit(parallel=True)
 def Zs():
-    Ts = np.linspace(1e-6, 5, 50)
+    Ts = np.linspace(5e-2, 5, 50)
     gs = [0.01, 0.1, 0.5, 1.0, 2.0]
     Zc1_L = np.empty((len(Ts), len(gs)), dtype=np.double)
-    Zc2_L2 = np.empty((len(Ts), len(gs)), dtype=np.double)
-    Zq1 = np.empty((len(Ts), len(gs)), dtype=np.double)
+    Zc2_L2 = np.empty((len(Ts), len(gs)), dtype=np.double)    
     Zq2 = np.empty((len(Ts), len(gs)), dtype=np.double)
     
     k = 0
@@ -110,20 +116,19 @@ def Zs():
         beta = 1/Ts[i]
         zc1 = Z_c_1_L(beta)
         zc2 = Z_c_2_L2(beta)
-        zq1 = Z_q_1(beta)
         for j in range(len(gs)):
             g = gs[j]
             Zc1_L[i, j] = zc1
             Zc2_L2[i, j] = zc2
-            Zq1[i, j] = zq1
             Zq2[i, j] = Z_q_2(beta, g)
             #Zqc2_L[(g, beta)] = Z_qc_2_L(beta, g)
 
-    return Zc1_L, Zc2_L2, Zq1, Zq2#, Zqc2_L
+    return Zc1_L, Zc2_L2, Zq2#, Zqc2_L
 
 def Zqc():
-    Ts = np.linspace(1e-6, 5, 200)
+    Ts = np.linspace(5e-2, 5, 50)
     gs = [0.01, 0.1, 0.5, 1.0, 2.0, 5.0]
+    Zq1 = np.empty((len(Ts), len(gs)), dtype=np.double)
     Zqc2_L = np.empty((len(Ts), len(gs)), dtype=np.double)
     
     for i in range(len(Ts)):  
@@ -131,12 +136,13 @@ def Zqc():
         beta = 1/Ts[i]
         for j in range(len(gs)):
             g = gs[j]
+            Zq1[i, j] = Z_q_1(beta)
             Zqc2_L[i, j] = Z_qc_2_L(beta, g)
 
-    return Zqc2_L
+    return Zq1, Zqc2_L
 
 @njit
-def fug_eqn(z, alpha, n, L, a, b, c, d, f):
+def fug_eqn_min(z, alpha, n, L, a, b, c, d, f):
     lambda_l2 = 0.001
     f1 = n*(1-alpha) - (a*z[0] + (2*c*L - a**2*L)*z[0]**2 - (a*b + f)*z[0]*z[1])
     f2 = alpha*n - (b/L*z[1] + (2*d/L - b**2/L)*z[1]**2 - (a*b + f)*z[0]*z[1])
@@ -150,13 +156,29 @@ def fug_eqn(z, alpha, n, L, a, b, c, d, f):
     # return np.array([f1, f2])
     return objective, grad
 
+@njit
+def fug_eqn_root(z, alpha, n, L, a, b, c, d, f):
+    f1 = n*(1-alpha) - (a*z[0] + (2*c*L - a**2*L)*z[0]**2 - (a*b + f)*z[0]*z[1])
+    f2 = alpha*n - (b/L*z[1] + (2*d/L - b**2/L)*z[1]**2 - (a*b + f)*z[0]*z[1])
+
+    objective = np.array([f1, f2])
+
+    jac = np.empty((2, 2))
+    jac[0, 0] = - (a + 2*(2*c*L - a**2*L)*z[0] - (a*b + f)*z[1])
+    jac[0, 1] = (a*b + f)*z[0]
+    jac[1, 0] = (a*b + f)*z[1]
+    jac[1, 1] = - (b/L + 2 * (2*d/L - b**2/L)*z[1] - (a*b + f)*z[0])
+
+    # return np.array([f1, f2])
+    return objective, jac
+
 finish_count = 0
 needed = 50 * 5 * 20 * 6 * 6
 def fugs(Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L):
     global finish_count, needed
-    Ts = np.linspace(1e-6, 5, 50)
+    Ts = np.linspace(5e-2, 5, 50)
     gs = [0.01, 0.1, 0.5, 1.0, 2.0]
-    Ls = np.logspace(-6, 1, 20)
+    Ls = np.logspace(-3, 1, 20)
     alphas = np.linspace(1e-6, 1, 6)
     ns = np.logspace(10, 20, 6)
 
@@ -173,16 +195,22 @@ def fugs(Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L):
         finish_count += 1
 
     promises = [[[[[[] for m in range(len(ns))] for l in range(len(alphas))] for k in range(len(Ls))] for j in range(len(gs))] for i in range(len(Ts))]
-    with Pool(processes=8) as procs:
+    with Pool(processes=20) as procs:
         for i, T in enumerate(Ts):
             for j, g in enumerate(gs):
                 for k, L in enumerate(Ls):
                     for l, alpha in enumerate(alphas):
                         for m, n in enumerate(ns):
+                            # promises[i][j][k][l][m] = procs.apply_async(
+                            #     scpopt.minimize, 
+                            #     (fug_eqn_min, z0), 
+                            #     dict(jac=True, bounds=[(1e-10, None), (1e-10, None)], args=(alpha, n, L, Zc1_L[i, j], Zq1[i, j], Zc2_L2[i, j], Zq2[i, j], Zqc2_L[i, j])),      
+                            #     callback=progress                          
+                            # )
                             promises[i][j][k][l][m] = procs.apply_async(
-                                scpopt.minimize, 
-                                (fug_eqn, z0), 
-                                dict(jac=True, bounds=[(1e-10, None), (1e-10, None)], args=(alpha, n, L, Zc1_L[i, j], Zq1[i, j], Zc2_L2[i, j], Zq2[i, j], Zqc2_L[i, j])),      
+                                scpopt.root, 
+                                (fug_eqn_root, z0), 
+                                dict(jac=True, args=(alpha, n, L, Zc1_L[i, j], Zq1[i, j], Zc2_L2[i, j], Zq2[i, j], Zqc2_L[i, j])),      
                                 callback=progress                          
                             )
         
@@ -198,8 +226,9 @@ def fugs(Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L):
                                 try:
                                     z_vec = promises[i][j][k][l][m].get().x
                                     fugs_c[i, j, k, l, m], fugs_q[i, j, k, l, m] = z_vec
-                                    sol_test, grad = fug_eqn(z_vec, alpha, n, L, Zc1_L[i, j], Zq1[i, j], Zc2_L2[i, j], Zq2[i, j], Zqc2_L[i, j])
-                                    errs[i, j, k, l, m] = sol_test - 0.001 * np.linalg.norm(z_vec)**2
+                                    #sol_test, grad = fug_eqn_min(z_vec, alpha, n, L, Zc1_L[i, j], Zq1[i, j], Zc2_L2[i, j], Zq2[i, j], Zqc2_L[i, j])
+                                    sol_test, grad = fug_eqn_root(z_vec, alpha, n, L, Zc1_L[i, j], Zq1[i, j], Zc2_L2[i, j], Zq2[i, j], Zqc2_L[i, j])
+                                    errs[i, j, k, l, m] = np.linalg.norm(sol_test)# - 0.001 * np.linalg.norm(z_vec)**2
                                 except TimeoutError:
                                     #print("missing sol")
                                     fugs_c[i, j, k, l, m], fugs_q[i, j, k, l, m] = [np.nan, np.nan]
@@ -215,12 +244,12 @@ def p_eos(beta, alpha, n, L, a, b, c, d, f):
     return 1/(beta) * (a*zc + b/L*zq + 0.5*(2*c*L - a*L**2)*zc**2 + 0.5*(2*d/L - b**2/L)*zq**2 - (a*b + f)*zc*zq) # factors 1/L distributed
 
 def save_zs():
-    Zc1_L, Zc2_L2, Zq1, Zq2 = Zs()
+    Zc1_L, Zc2_L2, Zq2 = Zs()
     np.savetxt("Zc1_L.txt", Zc1_L)
-    np.savetxt("Zc2_L2.txt", Zc2_L2)
-    np.savetxt("Zq1.txt", Zq1)
+    np.savetxt("Zc2_L2.txt", Zc2_L2)    
     np.savetxt("Zq2.txt", Zq2)
-    Zqc2_L = Zqc()
+    Zq1, Zqc2_L = Zqc()
+    np.savetxt("Zq1.txt", Zq1)
     np.savetxt("Zqc2_L.txt", Zqc2_L)
 
 def load_zs():
@@ -234,9 +263,9 @@ def load_zs():
 def save_fugs():
     Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L = load_zs()
     fugs_c, fugs_q, errs = fugs(Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L)
-    np.save("fugs_c.npy", fugs_c)
-    np.save("fugs_q.npy", fugs_q)
-    np.save("errs.npy", errs)
+    np.save("fugs_root_c.npy", fugs_c)
+    np.save("fugs_root_q.npy", fugs_q)
+    np.save("errs_root.npy", errs)
 
 def load_fugs():
     fugs_c = np.load("fugs_c.npy")
@@ -245,9 +274,9 @@ def load_fugs():
     return fugs_c, fugs_q, errs
 
 def save_ps():
-    Ts = np.linspace(1e-6, 5, 50)
+    Ts = np.linspace(5e-2, 5, 50)
     gs = [0.01, 0.1, 0.5, 1.0, 2.0]
-    Ls = np.logspace(-6, 1, 20)
+    Ls = np.logspace(-3, 1, 20)
     alphas = np.linspace(1e-6, 1, 6)
     ns = np.logspace(10, 20, 6)
     Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L = load_zs()
@@ -280,9 +309,9 @@ def load_ps():
     
 
 def plot_mus():
-    Ts = np.linspace(1e-6, 5, 50)
+    Ts = np.linspace(5e-2, 5, 50)
     gs = [0.01, 0.1, 0.5, 1.0, 2.0]
-    Ls = np.logspace(-6, 1, 20)
+    Ls = np.logspace(-3, 1, 20)
     alphas = np.linspace(1e-6, 1, 6)
     ns = np.logspace(10, 20, 6)
     fugs_c, fugs_q, errs = load_fugs()
@@ -307,12 +336,16 @@ def plot_mus():
                 level_max = max(np.nanmax(fugs_c[:, j, :, l, m]), np.nanmax(fugs_q[:, j, :, l, m]))
                 levels_exp = np.arange(np.floor(np.log10(level_min)-1), np.ceil(np.log10(level_max)+1), step=0.1)
                 levels = np.power(10, levels_exp)
+                level_min_err = np.nanmin(errs[:, j, :, l, m])
+                level_max_err = np.nanmax(errs[:, j, :, l, m])
+                levels_exp_err = np.arange(np.floor(np.log10(level_min_err)-1), np.ceil(np.log10(level_max_err)+1), step=0.1)
+                levels_err = np.power(10, levels_exp_err)
                 #levels = np.linspace(level_min, level_max+1e-6, 100)
                 fig, [c_ax, q_ax, cb1,  err_ax, cb2] = plt.subplots(figsize=(12, 6), nrows=1, ncols=5, squeeze=True, width_ratios=(1, 1, 0.3, 1, 0.3))
                 cfc = c_ax.contourf(Ts, Ls, fugs_c[:, j, :, l, m].T, levels=levels, norm=LogNorm())
                 cfq = q_ax.contourf(Ts, Ls, fugs_q[:, j, :, l, m].T, levels=levels, norm=LogNorm())
                 fig.colorbar(cfq, cax=cb1, label="$z$", fraction=0.4)
-                errfq = err_ax.contourf(Ts, Ls, np.abs(errs[:, j, :, l, m].T))
+                errfq = err_ax.contourf(Ts, Ls, np.abs(errs[:, j, :, l, m].T), levels=levels_err, norm=LogNorm())
                 fig.colorbar(errfq, cax=cb2, label="$f(z)\\overset{!}{=}0$", fraction=0.4)
                 c_ax.set_xlabel("$T$ $(\\varepsilon)$")
                 c_ax.set_yscale("log")
@@ -324,9 +357,9 @@ def plot_mus():
                 q_ax.set_title("$z_\\text{q}$")
                 c_ax.set_xlim(0, 5)
                 q_ax.set_xlim(0, 5)
-                c_ax.set_ylim(1e-6, 10)
-                q_ax.set_ylim(1e-6, 10)
-                err_ax.set_ylim(1e-6, 10)
+                c_ax.set_ylim(1e-3, 10)
+                q_ax.set_ylim(1e-3, 10)
+                err_ax.set_ylim(1e-3, 10)
                 fig.suptitle(f"$g={g}\\,\\varepsilon$, $\\alpha={alpha}$, $n={np.format_float_scientific(n, precision=3)}/L$")
 
                 #fig.tight_layout()
@@ -335,9 +368,9 @@ def plot_mus():
         
 
 def plot_ps():
-    Ts = np.linspace(1e-6, 5, 50)
+    Ts = np.linspace(5e-2, 5, 50)
     gs = [0.01, 0.1, 0.5, 1.0, 2.0]
-    Ls = np.logspace(-6, 1, 20)
+    Ls = np.logspace(-3, 1, 20)
     alphas = np.linspace(1e-6, 1, 6)
     ns = np.logspace(10, 20, 6)
     ps = load_ps()
@@ -367,7 +400,7 @@ def plot_ps():
                 ax.set_xlabel("$T$ $(\\varepsilon)$")
                 ax.set_ylabel("$L$")
                 ax.set_xlim(0, 5)
-                ax.set_ylim(1e-6, 10)
+                ax.set_ylim(1e-3, 10)
                 fig.suptitle(f"$g={g}\\,\\varepsilon$, $\\alpha={alpha}$, $n={np.format_float_scientific(n, precision=3)}/L$")
 
                 #fig.tight_layout()
@@ -376,7 +409,7 @@ def plot_ps():
 
 
 # save_zs()
-# save_fugs()
+save_fugs()
 # save_ps()
-plot_ps()
-# plot_mus()
+# plot_ps()
+plot_mus()
