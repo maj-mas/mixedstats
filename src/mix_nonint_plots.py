@@ -4,6 +4,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm.auto import tqdm
+from mpmath import jtheta, diff
 
 # mpl defaults
 plt.rcParams.update({
@@ -29,29 +30,38 @@ sum_cutoff = 1e6
 ns_sum = np.arange(1, sum_cutoff, 1)
 ns_sum_sq = ns_sum ** 2
 
+# def th3(x):
+#     return 1.0 + 2 * np.sum(x ** ns_sum_sq)
+
+# def th3_p(x):
+#     return 2 * np.sum(ns_sum_sq * x ** (ns_sum_sq - 1))
+
+# def th3_pp(x):
+#     return 2 * np.sum(ns_sum_sq * (ns_sum_sq - 1) * x ** (ns_sum_sq - 2))
+
 def th3(x):
-    return 1.0 + np.sum(x ** ns_sum_sq)
+    return float(jtheta(3, 0, x))
 
 def th3_p(x):
-    return np.sum(ns_sum_sq * x ** (ns_sum_sq - 1))
+    return float(diff(lambda x: jtheta(3, 0, x), x))
 
 def th3_pp(x):
-    return np.sum(ns_sum_sq * (ns_sum_sq - 1) * x ** (ns_sum_sq - 2))
+    return float(diff(lambda x: jtheta(3, 0, x), x, 2))
 
 def F_N(alpha, beta): # free erg per particle without constant term due to particle number
     return (- (1 - alpha) * 0.5 * (np.log(beta) + np.log(4.0 / np.pi)) + \
-            alpha * np.log(th3(np.exp(-beta))) ) / beta
+            alpha * np.log(th3(np.exp(-beta)) - 1) ) / beta
 
-def C_N(alpha, beta): # specific heat per particle
+def C_N(alpha, beta): # specific heat per particle    
     q = np.exp(-beta)
     return (1 - alpha) / 2 + alpha * beta**2 * q * ( \
-        q * (th3(q)*th3_pp(q) - th3_p(q)**2)/th3(q)**2 + th3_p(q)/th3(q) )
+        q * ((th3(q) - 1)*th3_pp(q) - th3_p(q)**2)/(th3(q) - 1)**2 + th3_p(q)/(th3(q) - 1) )
 
 def p_N(alpha, beta, L):
-    return (1 - alpha) / (beta * L) + alpha * 0.5 / L**3 * th3_p(np.exp(-beta))/th3(np.exp(-beta)) * np.exp(-beta)
+    return (1 - alpha) / (beta * L) + alpha * 0.5 / L**3 * th3_p(np.exp(-beta))/(th3(np.exp(-beta)) - 1) * np.exp(-beta)
 
 def plot_thetas():
-    xs = np.linspace(0, 1, 100)
+    xs = np.linspace(0, 0.99, 100)
     th    = np.vectorize(th3)((xs))
     th_p  = np.vectorize(th3_p)((xs))
     th_pp = np.vectorize(th3_pp)((xs))
@@ -72,7 +82,7 @@ def plot_thetas():
     fig.savefig("../plots/free-mix/theta.png")
 
 def plot_F_T():
-    Ts = np.linspace(1e-6, 3, 100)
+    Ts = np.linspace(5e-2, 3, 100)
     betas = 1 / Ts
     F = np.vectorize(F_N)
     F_0  = F(0.0, betas)
@@ -87,7 +97,7 @@ def plot_F_T():
     ax.plot(Ts, F_05, label="$\\alpha=0.5$")
     ax.plot(Ts, F_09, label="$\\alpha=0.9$")
     ax.plot(Ts, F_1, label="$\\alpha=1$")
-    ax.set_ylim(-0.25, 2)
+    ax.set_ylim(-1, 2)
     ax.set_xlim(0, 3)
     ax.set_ylabel("$(F+ \\ln(\\alpha N)! + \\ln ((1-\\alpha)N)!)/N $ $(\\varepsilon)$")
     ax.set_xlabel("$T$ $(\\varepsilon/k)$")
@@ -99,7 +109,7 @@ def plot_F_T():
     fig.savefig("../plots/free-mix/freeerg.png")
 
 def plot_F_alpha():
-    Ts = np.array([1e-6, 1e-2, 1e-1, 0.5, 2])
+    Ts = np.array([5e-2, 1e-1, 0.5, 2])
     betas = 1 / Ts
     alphas = np.linspace(0, 1, 20)
     F = np.vectorize(F_N)
@@ -111,7 +121,7 @@ def plot_F_alpha():
     ax.legend()
     ax.grid()
     ax.set_xlim(0, 1)
-    ax.set_ylim(-0.25, 2)
+    ax.set_ylim(-1, 2)
     ax.set_xlabel("$\\alpha$")
     ax.set_ylabel("$(F+ \\ln(\\alpha N)! + \\ln ((1-\\alpha)N)!)/N $ $(\\varepsilon)$")
     
@@ -120,7 +130,7 @@ def plot_F_alpha():
     fig.savefig("../plots/free-mix/freeerg_alpha.png")
 
 def plot_C():
-    Ts = np.linspace(1e-6, 3, 100)
+    Ts = np.linspace(5e-2, 3, 100)
     betas = 1 / Ts
     C = np.vectorize(C_N)
     C_0  = C(0.0, betas)
@@ -147,7 +157,7 @@ def plot_C():
     fig.savefig("../plots/free-mix/C.png")
 
 def plot_C_alpha():
-    Ts = np.array([1e-6, 1e-2, 1e-1, 0.5, 2])
+    Ts = np.array([5e-2, 1e-1, 0.5, 2])
     betas = 1 / Ts
     alphas = np.linspace(0, 1, 20)
     C = np.vectorize(C_N)
@@ -159,7 +169,7 @@ def plot_C_alpha():
     ax.legend()
     ax.grid()
     ax.set_xlim(0, 1)
-    ax.set_ylim(-0.25, 2)
+    ax.set_ylim(0, 1)
     ax.set_xlabel("$\\alpha$")
     ax.set_ylabel("$C_L/N$ $(\\varepsilon)$")
     
@@ -168,9 +178,9 @@ def plot_C_alpha():
     fig.savefig("../plots/free-mix/C_alpha.png")
 
 def plot_eos(alpha):
-    Ts = np.array([1e-6, 1e-2, 1e-1, 0.5, 2])
+    Ts = np.array([5e-2, 1e-1, 0.5, 2])
     betas = 1 / Ts
-    Ls = np.logspace(-6, 2, 100)
+    Ls = np.logspace(-3, 2, 100)
     p = np.vectorize(p_N)
 
     fig, ax = plt.subplots()
@@ -192,7 +202,7 @@ def plot_eos(alpha):
 def plot_eos_T(T):
     alphas = np.linspace(0, 1, 6)
     beta = 1 / T
-    Ls = np.logspace(-6, 2, 100)
+    Ls = np.logspace(-3, 2, 100)
     p = np.vectorize(p_N)
 
     fig, ax = plt.subplots()
@@ -220,7 +230,7 @@ def main():
     
     for alpha in [0, 0.1, 0.5, 0.9, 1]:
         plot_eos(alpha)
-    for T in [1e-6, 1e-2, 1e-1, 0.5, 2]:
+    for T in [5e-2, 1e-1, 0.5, 2]:
         plot_eos_T(T)
     
 
