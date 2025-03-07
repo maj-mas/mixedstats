@@ -86,7 +86,7 @@ def Z_q_1(beta):
 
 @njit
 def Z_c_1_L(beta): # Z divided by L!
-    return np.sqrt(1/(4*beta))
+    return 1/np.sqrt((4*beta))
 
 @njit
 def Z_q_2(beta, g):
@@ -237,8 +237,10 @@ def fugs(Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L):
 
 @njit
 def p_eos(beta, alpha, n, L, a, b, c, d, f):
-    zc = (1-alpha) * n * L * (alpha/(1-alpha)**2 / f - b * f * (f + a)/(f**2 - a*b))
-    zq = (1-alpha) * n * L * (f + a)/(f**2 - a*b)
+    # zc = (1-alpha) * n * L * (alpha/(1-alpha)**2 / f - b * f * (f + a)/(f**2 - a*b))
+    # zq = (1-alpha) * n * L * (f + a)/(f**2 - a*b)
+    zc = (1-alpha) / (a*b + f) * (b - 1/(n*L))
+    zq = alpha / (a*b + f) * (a - 1/(n*L))
     return 1/(beta) * (a*zc + b/L*zq + 0.5*(2*c*L - a*L**2)*zc**2 + 0.5*(2*d/L - b**2/L)*zq**2 - (a*b + f)*zc*zq) # factors 1/L distributed
 
 @njit 
@@ -416,13 +418,16 @@ def plot_ps():
     Ls = np.logspace(-3, 1, 20)
     alphas = np.linspace(1e-6, 1, 6)
     ns = np.logspace(10, 20, 6)
-    ps = load_ps_z()    
+    ps = load_ps()    
     ps = np.clip(ps, 1e-6, None)
 
-    rng = np.random.default_rng()
-    random_g_is = rng.integers(len(gs), high=None, size=2)
-    random_alpha_is = rng.integers(len(alphas), high=None, size=2)
-    random_n_is = rng.integers(len(ns), high=None, size=2)
+    # rng = np.random.default_rng()
+    # random_g_is = rng.integers(len(gs), high=None, size=2)
+    # random_alpha_is = rng.integers(len(alphas), high=None, size=2)
+    # random_n_is = rng.integers(len(ns), high=None, size=2)
+    random_g_is = [2]
+    random_alpha_is = [0, 1, 2, 3, 4, 5]
+    random_n_is = [2]
     for j in random_g_is:
         g = gs[j]
         for l in random_alpha_is:
