@@ -239,8 +239,10 @@ def fugs(Zc1_L, Zc2_L2, Zq1, Zq2, Zqc2_L):
 def p_eos(beta, alpha, n, L, a, b, c, d, f):
     # zc = (1-alpha) * n * L * (alpha/(1-alpha)**2 / f - b * f * (f + a)/(f**2 - a*b))
     # zq = (1-alpha) * n * L * (f + a)/(f**2 - a*b)
-    zc = (1-alpha) / (a*b + f) * (b - 1/(n*L))
-    zq = alpha / (a*b + f) * (a - 1/(n*L))
+    # zc = (1-alpha) / (a*b + f) * (b - 1/(n*L))
+    # zq = alpha / (a*b + f) * (a - 1/(n*L))
+    zc = (1 - alpha) * n * L / ( a - b*a/2 + n*L * (a*b + f) * ((1 - 2*alpha)/(2*alpha) + alpha * np.sqrt( ((1 - 2*alpha)/alpha - b*a / (alpha * n * L * (a*b + f)))**2/4 - a/(alpha * n * L * (a*b + f))) ))
+    zq = alpha * n * L * ( -1/2 * ( (1 - 2*alpha)/alpha - b*a/(alpha * n*L * (a*b + f)) ) - np.sqrt( ((1 - 2*alpha)/alpha - b*a / (alpha * n * L * (a*b + f)))**2/4 - a/(alpha * n * L * (a*b + f))))
     return 1/(beta) * (a*zc + b/L*zq + 0.5*(2*c*L - a*L**2)*zc**2 + 0.5*(2*d/L - b**2/L)*zq**2 - (a*b + f)*zc*zq) # factors 1/L distributed
 
 @njit 
@@ -419,7 +421,7 @@ def plot_ps():
     alphas = np.linspace(1e-6, 1, 6)
     ns = np.logspace(10, 20, 6)
     ps = load_ps()    
-    ps = np.clip(ps, 1e-6, None)
+    ps[ps <= 0] = np.nan
 
     # rng = np.random.default_rng()
     # random_g_is = rng.integers(len(gs), high=None, size=2)
@@ -427,7 +429,7 @@ def plot_ps():
     # random_n_is = rng.integers(len(ns), high=None, size=2)
     random_g_is = [2]
     random_alpha_is = [0, 1, 2, 3, 4, 5]
-    random_n_is = [2]
+    random_n_is = [1]
     for j in random_g_is:
         g = gs[j]
         for l in random_alpha_is:
@@ -436,9 +438,10 @@ def plot_ps():
                 n = ns[m]
                 level_min = np.nanmin(ps[:, j, :, l, m])
                 level_max = np.nanmax(ps[:, j, :, l, m])
+                print(level_min, level_max)
                 levels_exp = np.arange(np.floor(np.log10(level_min)), np.ceil(np.log10(level_max)), step=0.1)
                 levels = np.power(10, levels_exp)
-                #levels = np.linspace(level_min, level_max, 100)
+                # levels = np.linspace(level_min, level_max, 100)
 
                 fig, ax = plt.subplots()
                 pcf = ax.contourf(Ts, Ls, ps[:, j, :, l, m].T, levels=levels, norm=LogNorm())
@@ -448,7 +451,7 @@ def plot_ps():
                 ax.set_yscale("log")
                 ax.set_xlabel("$T$ $(\\varepsilon)$")
                 ax.set_ylabel("$L$")
-                ax.set_xlim(0, 5)
+                ax.set_xlim(0.5, 5)
                 ax.set_ylim(1e-3, 10)
                 fig.suptitle(f"$g={g}\\,\\varepsilon$, $\\alpha={alpha}$, $n={np.format_float_scientific(n, precision=3)}/L$")
 
@@ -459,7 +462,7 @@ def plot_ps():
 
 # save_zs()
 # save_fugs()
-# save_ps()
+save_ps()
 # save_ps_z()
 plot_ps()
 # plot_mus()
