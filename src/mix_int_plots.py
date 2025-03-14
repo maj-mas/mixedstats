@@ -86,11 +86,15 @@ def V(g, n1, n2): # yikes
 
 #@njit
 def Z_qc_2(beta, g, L):
-    return np.sqrt(1/(4*beta)) / np.pi * 0.5 * (th3(np.exp(-beta*EPS_KB/L**2)) - 1) * I(beta, g) * L
+    t3 = th3(np.exp(-beta*EPS_KB/L**2))
+    ret = np.sqrt(1/(4*beta)) / np.pi * 0.5 * (th3(np.exp(-beta*EPS_KB/L**2)) - 1) * I(beta, g) * L if not np.isnan(t3) \
+        else np.sqrt(1/(4*beta)) / np.pi * Z_c_1(beta, L) * (1 - np.sqrt(2*beta*EPS_KB/np.pi)/L) * I(beta, g) * L
+    return ret 
 
 #@njit
 def Z_q_1(beta, L):
-    return 0.5 * (th3(np.exp(-beta*EPS_KB/L**2)) - 1)
+    t3 = th3(np.exp(-beta*EPS_KB/L**2))
+    return 0.5 * (t3 - 1) if not np.isnan(t3) else Z_c_1(beta, L) * (1 - np.sqrt(2*beta*EPS_KB/np.pi)/L)
 
 @njit
 def Z_c_1(beta, L):
@@ -98,11 +102,12 @@ def Z_c_1(beta, L):
 
 @njit
 def Z_q_2(beta, g, L):
-    z = 0.0
-    for n1 in ns_sum:
-        for n2 in ns_sum:
-            z += np.exp(-beta*(n1**2*EPS_KB/L**2 + n2**2*EPS_KB/L**2 + V(g, n1, n2)))
-    return z
+    # z = 0.0
+    # for n1 in ns_sum:
+    #     for n2 in ns_sum:
+    #         z += np.exp(-beta*(n1**2*EPS_KB/L**2 + n2**2*EPS_KB/L**2 + V(g, n1, n2)))
+    # return z
+    return Z_c_2(beta, L) * (1 - 4*4*beta*EPS_KB/(np.sqrt(2)*L*np.pi))
 
 @njit
 def Z_c_2(beta, L):
@@ -235,7 +240,7 @@ def fugs(Zc1, Zc2, Zq1, Zq2, Zqc2):
         finish_count += 1
 
     promises = [[[[[[] for m in range(len(Ns))] for l in range(len(alphas))] for k in range(len(Ls))] for j in range(len(gs))] for i in range(len(Ts))]
-    with Pool(processes=20) as procs:
+    with Pool(processes=8) as procs:
         for i, T in enumerate(Ts):
             for j, g in enumerate(gs):
                 for k, L in enumerate(Ls):
@@ -279,29 +284,29 @@ def fugs(Zc1, Zc2, Zq1, Zq2, Zqc2):
 
 @njit
 def fugc(alpha, N, L, a, b, c, d, f): 
-    # rc1 = (1-alpha)/a
-    # rc2 = (2*(1-alpha) * (b*(a**2 - 2*(1-alpha)*c) -     alpha*a*f)) / (a**3 * b)
-    # rc3 = (-6*(-1 + alpha)*(b**3*(a**4 - a**2*(-5 + alpha)*(-1 + alpha)*c + 8*(-1 + alpha)**2*c**2) - a**4*alpha**2*b*d + \
-    #                         a*alpha*(-6*(-1 + alpha)*b**2*c + a**2*((-3 + alpha)*b**2 + 2*alpha*d))*f + a**2*alpha*b*f**2))/(a**5*b**3)
-    rc1 = 1/a
-    #rc2 = 4*c/a**3 - 2*alpha/(1-alpha) * f/(a**2 * b) - 2*(1-2*alpha)/(1-alpha) / a
-    rc2 = 2 * (a**2 * b - 2 * b * c + 2 * alpha * b * c - alpha * a * f) / (a**3 * b)
+    rc1 = (1-alpha)/a
+    rc2 = (2*(1-alpha) * (b*(a**2 - 2*(1-alpha)*c) -     alpha*a*f)) / (a**3 * b)
+    rc3 = (-6*(-1 + alpha)*(b**3*(a**4 - a**2*(-5 + alpha)*(-1 + alpha)*c + 8*(-1 + alpha)**2*c**2) - a**4*alpha**2*b*d + \
+                            a*alpha*(-6*(-1 + alpha)*b**2*c + a**2*((-3 + alpha)*b**2 + 2*alpha*d))*f + a**2*alpha*b*f**2))/(a**5*b**3)
+    # rc1 = 1/a
+    # #rc2 = 4*c/a**3 - 2*alpha/(1-alpha) * f/(a**2 * b) - 2*(1-2*alpha)/(1-alpha) / a
+    # rc3 = 2 * (a**2 * b - 2 * b * c + 2 * alpha * b * c - alpha * a * f) / (a**3 * b)
     
-    #return N * rc1 + N**2 * rc2 + N**3 * rc3
-    return (1-alpha) * N * rc1 + (1-alpha) * N**2 * rc2
+    return N * rc1# + N**2 * rc2 + N**3 * rc3
+    #return (1-alpha) * N * rc1 + (1-alpha) * N**2 * rc2
 
 @njit
 def fugq(alpha, N, L, a, b, c, d, f):
-    # rq1 = alpha/b
-    # rq2 = (2*alpha     * (a*(b**2 - 2*alpha    *d) - (1-alpha)*b*f)) / (a*b**3)
-    # rq3 = (6*alpha*(a**3*(b**4 - alpha*(4 + alpha)*b**2*d + 8*alpha**2*d**2) + 2*(-1 + alpha)**2*b**3*c*f + a**2*(-1 + alpha)*b*((2 + alpha)*b**2 - 6*alpha*d)*f - \
-    #                a*(-1 + alpha)*b**2*((-1 + alpha)*b**2*c + f**2)))/(a**3*b**5)
-    rq1 = 1/b
-    #rq2 = -4*d/b**3 - 2*(1-alpha)/alpha * f/(a * b**2) + 2*(1-2*alpha)/alpha / b
-    rq2 = 2 * (a * b**2 - 2 * alpha * a * d - b * f + alpha * b * f) / (a * b**3)
+    rq1 = alpha/b
+    rq2 = (2*alpha     * (a*(b**2 - 2*alpha    *d) - (1-alpha)*b*f)) / (a*b**3)
+    rq3 = (6*alpha*(a**3*(b**4 - alpha*(4 + alpha)*b**2*d + 8*alpha**2*d**2) + 2*(-1 + alpha)**2*b**3*c*f + a**2*(-1 + alpha)*b*((2 + alpha)*b**2 - 6*alpha*d)*f - \
+                   a*(-1 + alpha)*b**2*((-1 + alpha)*b**2*c + f**2)))/(a**3*b**5)
+    # rq1 = 1/b
+    # #rq2 = -4*d/b**3 - 2*(1-alpha)/alpha * f/(a * b**2) + 2*(1-2*alpha)/alpha / b
+    # rq3 = 2 * (a * b**2 - 2 * alpha * a * d - b * f + alpha * b * f) / (a * b**3)
     
-    #return N * rq1 + N**2 * rq2 + N**3 * rq3
-    return alpha*N * rq1 + alpha * N**2 * rq2
+    return N * rq1# + N**2 * rq2 + N**3 * rq3
+    #return alpha*N * rq1 + alpha * N**2 * rq2
 
 @njit
 def p_eos(beta, alpha, N, L, a, b, c, d, f):
@@ -314,8 +319,8 @@ def p_eos(beta, alpha, N, L, a, b, c, d, f):
     # r1 = 1 / (a - (a*b + f) * alpha * n * L * r2)
     # zc = (1-alpha)*n*L * r1
     # zq = alpha*n*L * r2
-    # zc = (a*b + (2*alpha - 1) * N * (a*b + f) - np.sqrt((a*b)**2 - 2*a*b * (a*b + f) * N + ((1 - 2*alpha) * N * (a*b + f))**2)) / (2*a * (a*b + f))
-    # zq = (a*b + (2*alpha - 1) * N * (a*b + f) - np.sqrt((a*b)**2 - 2*a*b * (a*b + f) * N + ((1 - 2*alpha) * N * (a*b + f))**2)) / (2*b * (a*b + f)) 
+    zc = (a*b + (2*alpha - 1) * N * (a*b + f) - np.sqrt((a*b)**2 - 2*a*b * (a*b + f) * N + ((1 - 2*alpha) * N * (a*b + f))**2)) / (2*a * (a*b + f))
+    zq = (a*b + (2*alpha - 1) * N * (a*b + f) - np.sqrt((a*b)**2 - 2*a*b * (a*b + f) * N + ((1 - 2*alpha) * N * (a*b + f))**2)) / (2*b * (a*b + f)) 
     # zc = (1 - alpha) * N * 2*b / (a*b + (2*alpha - 1) * N * (a*b + f) - np.sqrt((a*b)**2 - 2*a*b * (a*b + f) * N + ((1 - 2*alpha) * N * (a*b + f))**2))
     # zq = (a*b + (2*alpha - 1) * N * (a*b + f) + np.sqrt((a*b)**2 - 2*a*b * (a*b + f) * N + ((1 - 2*alpha) * N * (a*b + f))**2)) / (2*b * (a*b + f))
     # zc = (1-alpha)*N * 2 * b / (a*b - a*f + np.sqrt((a*b - a*f)**2 + 8*(1-alpha)*b*c*f))
@@ -326,17 +331,37 @@ def p_eos(beta, alpha, N, L, a, b, c, d, f):
     # zq = alpha * N / (b)
     # zc = (2*a*d + b*f + N*( (1-alpha)*(b**2 - 2*d) -     alpha*(a*b + f) )) / (2*b**2*c + 2*a**2*d - 4*c*d + 2*a*b*f + f**2)
     # zq = (2*b*c + a*f + N*(     alpha*(a**2 - 2*c) - (1-alpha)*(a*b + f) )) / (2*b**2*c + 2*a**2*d - 4*c*d + 2*a*b*f + f**2)
-    zc = fugc(alpha, N, L, a, b, c, d, f)
-    zq = fugq(alpha, N, L, a, b, c, d, f)
+    # zc = fugc(alpha, N, L, a, b, c, d, f)
+    # zq = fugq(alpha, N, L, a, b, c, d, f)
     
 
     return 1/(beta*KB*L*N) * np.log(a*zc + b*zq + c*zc**2 + d*zq**2 + f*zc*zq) #(a*zc + b*zq + 0.5*(2*c - a**2)*zc**2 + 0.5*(2*d - b**2)*zq**2 - (a*b + f)*zc*zq)
+
+@njit
+def p_virial(beta, alpha, N, L, a, b, c, d, f):
+    return N/(beta*L*EPS_KB) * (1 - virial_coeff(alpha, L, a, b, c, d, f)*N/L)
 
 @njit 
 def p_eos_z(beta, z, alpha, n, L, a, b, c, d, f):
     zc = z[0]
     zq = z[1]
     return 1/(beta*L) * (a*zc + b*zq + 0.5*(2*c - a**2)*zc**2 + 0.5*(2*d - b**2)*zq**2 - (a*b + f)*zc*zq)
+
+@njit
+def virial_coeff(alpha, L, a, b, c, d, f):
+    return L * ( (1-alpha)/a**2 * ((1-alpha)*(2*c - a**2) - 4*c) + alpha/b**2 * (alpha*(2*d - b**2) - 4*d) - 1/(a*b) * (alpha*(1-alpha)*(a*b + f) + 2*(1-2*alpha)*f) )
+
+def virial_coeffs():
+    Zc1, Zc2, Zq1, Zq2, Zqc2 = load_zs()
+    bs = np.empty((len(Ts), len(gs), len(Ls), len(alphas)))
+
+    for i, T in tqdm(enumerate(Ts)):
+        for j, g in enumerate(gs):
+            for k, L in enumerate(Ls):
+                for l, alpha in enumerate(alphas):                    
+                    bs[i, j, k, l] = virial_coeff(alpha, L, Zc1[i, j, k], Zq1[i, j, k], Zc2[i, j, k], Zq2[i, j, k], Zqc2[i, j, k])
+
+    return bs
 
 def save_zs():
     Zc1, Zc2, Zq2 = Zs()
@@ -408,7 +433,7 @@ def save_ps():
                 for l, alpha in enumerate(alphas):
                     for m, n in enumerate(Ns):
                         try:
-                            ps[i, j, k, l, m] = p_eos(1/T,
+                            ps[i, j, k, l, m] = p_virial(1/T,
                                                         alpha,
                                                         n,
                                                         L,
@@ -532,7 +557,7 @@ def plot_mus_analytic():
 
     fugs_c = np.load("fug_c_ana.npy")
     fugs_q = np.load("fug_q_ana.npy")
-    fugs_c[fugs_c <= 1e-16] = 1e-16
+    fugs_c[fugs_c <= 1e-16] = 1e-16    
     fugs_q[fugs_q <= 1e-16] = 1e-16
 
     rng = np.random.default_rng()
@@ -566,10 +591,10 @@ def plot_mus_analytic():
                     c_ax.set_ylabel("$L$")
                     c_ax.set_title("$z_\\text{c}$")
                     q_ax.set_title("$z_\\text{q}$")
-                    c_ax.set_xlim(1e-1, 1e8)
-                    q_ax.set_xlim(1e-1, 1e8)
-                    c_ax.set_ylim(1e-3, 10)
-                    q_ax.set_ylim(1e-3, 10)
+                    c_ax.set_xlim(1e-1, 1e3)
+                    q_ax.set_xlim(1e-1, 1e3)
+                    c_ax.set_ylim(1e-5, 1e-1)
+                    q_ax.set_ylim(1e-5, 1e-1)
                     fig.suptitle(f"$g={g}\\,\\varepsilon/L^2$, $\\alpha={alpha}$, $N={np.format_float_scientific(n, precision=3)}$")
 
                     # fig.tight_layout()
@@ -683,23 +708,54 @@ def plot_pL():
         ax.set_title(f"$g={g}$, $\\alpha={alpha}$, $N={np.format_float_scientific(n, precision=3)}$")
         fig.savefig(f"../plots/int-mix/eos/g{g}_alpha{alpha}_n{n}.pdf")
 
-# save_zs()
-# plot_zs()
-# save_fugs_analytic()
-# plot_mus_analytic()
+
+def plot_virial_coeff():
+    
+    bs = virial_coeffs()
+
+    j = 0 # g index
+    k = 5 # L index
+    
+    g = gs[j]
+    L = Ls[k]
+    fig, ax = plt.subplots()
+    for l, alpha in enumerate(alphas):
+        ax.plot(Ts, bs[:, j, k, l], label=f"$\\alpha={alpha}$")
+    ax.set_xscale("log")
+    ax.set_xlim(1e-1, 1e3)
+    ax.set_xlabel("$T$")
+    ax.set_ylabel("$b(T)$ $(1/L^2)$")
+    ax.set_title(f"$g={g}$, $L={L}$")
+    ax.grid()
+    ax.legend(loc="upper left")
+
+    fig.tight_layout()
+    fig.savefig(f"../plots/int-mix/coeff/g{g}_L{L}.pdf")
+    plt.close(fig)
+
+
+
+
+
+
+save_zs()
+plot_zs()
+#save_fugs_analytic()
+#plot_mus_analytic()
 # # save_fugs()
 save_ps()
-# # save_ps_z()
+# # # # save_ps_z()
 plot_ps() 
-# plot_pL()
+plot_pL()
+plot_virial_coeff()
 
-Zc1, Zc2, Zq1, Zq2, Zqc2 = load_zs()
-print(Zq1[:, 3, 10])
+# Zc1, Zc2, Zq1, Zq2, Zqc2 = load_zs()
+# print(Zq1[:, 3, 10])
 # print(Z_q_1(1/10, 0.01))
 #print(0.5 * (th3(np.exp(-1/0.1**2)) - 1))
-print(np.exp(-1/1e15))
-print(th3(np.exp(-1/1e15)))
-print(th3(0.9999999999999999))
+print(np.exp(-1/(100)*EPS_KB))
+# print(th3(np.exp(-1/1e15)))
+# print(th3(0.9999999999999999))
 #print(th3(np.exp(-np.pi**2/np.abs(np.log(np.exp(-1/1e10))))))
 #print(th3(np.exp(-1/1e10)))
 # mp.dps = 100
