@@ -338,8 +338,8 @@ def p_eos(beta, alpha, N, L, a, b, c, d, f):
     return 1/(beta*KB*L*N) * np.log(a*zc + b*zq + c*zc**2 + d*zq**2 + f*zc*zq) #(a*zc + b*zq + 0.5*(2*c - a**2)*zc**2 + 0.5*(2*d - b**2)*zq**2 - (a*b + f)*zc*zq)
 
 @njit
-def p_virial(beta, alpha, N, L, a, b, c, d, f):
-    return N/(beta*L*EPS_KB) * (1 - virial_coeff(alpha, L, a, b, c, d, f)*N/L)
+def p_virial(beta, alpha, N, L, a, b, c, d, f): # p/N
+    return 1/(beta*L*EPS_KB) * (1 - virial_coeff(alpha, L, a, b, c, d, f)*N/L)
 
 @njit 
 def p_eos_z(beta, z, alpha, n, L, a, b, c, d, f):
@@ -714,39 +714,37 @@ def plot_virial_coeff():
     bs = virial_coeffs()
 
     j = 0 # g index
-    k = 5 # L index
+    #k = 5 # L index
     
     g = gs[j]
-    L = Ls[k]
-    fig, ax = plt.subplots()
-    for l, alpha in enumerate(alphas):
-        ax.plot(Ts, bs[:, j, k, l], label=f"$\\alpha={alpha}$")
-    ax.set_xscale("log")
-    ax.set_xlim(1e-1, 1e3)
-    ax.set_xlabel("$T$")
-    ax.set_ylabel("$b(T)$ $(1/L^2)$")
-    ax.set_title(f"$g={g}$, $L={L}$")
-    ax.grid()
-    ax.legend(loc="upper left")
+    #L = Ls[k]
+    for k, L in enumerate(Ls):
+        L = Ls[k]
+        fig, ax = plt.subplots()
+        for l, alpha in enumerate(alphas):
+            ax.plot(Ts, bs[:, j, k, l], label=f"$\\alpha={alpha}$")
+        ax.set_xscale("log")
+        ax.set_xlim(1e-1, 1e3)
+        ax.set_xlabel("$T$")
+        ax.set_ylabel("$b(T)$ $(1/L^2)$")
+        ax.set_title(f"$g={g}$, $L={L}$")
+        ax.grid()
+        ax.legend(loc="upper left")
 
-    fig.tight_layout()
-    fig.savefig(f"../plots/int-mix/coeff/g{g}_L{L}.pdf")
-    plt.close(fig)
-
-
-
-
+        fig.tight_layout()
+        fig.savefig(f"../plots/int-mix/coeff/g{g}_L{L}.pdf")
+        plt.close(fig)
 
 
-save_zs()
-plot_zs()
-#save_fugs_analytic()
-#plot_mus_analytic()
-# # save_fugs()
-save_ps()
-# # # # save_ps_z()
-plot_ps() 
-plot_pL()
+# save_zs()
+# plot_zs()
+# #save_fugs_analytic()
+# #plot_mus_analytic()
+# # # save_fugs()
+# save_ps()
+# # # # # save_ps_z()
+# plot_ps() 
+# plot_pL()
 plot_virial_coeff()
 
 # Zc1, Zc2, Zq1, Zq2, Zqc2 = load_zs()
