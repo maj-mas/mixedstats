@@ -40,7 +40,7 @@ Ts = np.logspace(-1, 3, 50)
 gs = np.concat((np.asarray([0.0]), np.logspace(-3, 3, 7)))
 Ls = np.logspace(-5, -1, 20)
 alphas = np.linspace(1e-6, 1, 6)
-Ns = np.logspace(10, 20, 6)
+Ns = np.logspace(1, 6, 6)
 
 EPS_KB = 5.98e-19 # m^2 K
 KB = 1.381e-23 # J / K
@@ -319,8 +319,8 @@ def p_eos(beta, alpha, N, L, a, b, c, d, f):
     # r1 = 1 / (a - (a*b + f) * alpha * n * L * r2)
     # zc = (1-alpha)*n*L * r1
     # zq = alpha*n*L * r2
-    zc = (a*b + (2*alpha - 1) * N * (a*b + f) - np.sqrt((a*b)**2 - 2*a*b * (a*b + f) * N + ((1 - 2*alpha) * N * (a*b + f))**2)) / (2*a * (a*b + f))
-    zq = (a*b + (2*alpha - 1) * N * (a*b + f) - np.sqrt((a*b)**2 - 2*a*b * (a*b + f) * N + ((1 - 2*alpha) * N * (a*b + f))**2)) / (2*b * (a*b + f)) 
+    # zc = (a*b + (2*alpha - 1) * N * (a*b + f) - np.sqrt((a*b)**2 - 2*a*b * (a*b + f) * N + ((1 - 2*alpha) * N * (a*b + f))**2)) / (2*a * (a*b + f))
+    # zq = (a*b + (2*alpha - 1) * N * (a*b + f) - np.sqrt((a*b)**2 - 2*a*b * (a*b + f) * N + ((1 - 2*alpha) * N * (a*b + f))**2)) / (2*b * (a*b + f)) 
     # zc = (1 - alpha) * N * 2*b / (a*b + (2*alpha - 1) * N * (a*b + f) - np.sqrt((a*b)**2 - 2*a*b * (a*b + f) * N + ((1 - 2*alpha) * N * (a*b + f))**2))
     # zq = (a*b + (2*alpha - 1) * N * (a*b + f) + np.sqrt((a*b)**2 - 2*a*b * (a*b + f) * N + ((1 - 2*alpha) * N * (a*b + f))**2)) / (2*b * (a*b + f))
     # zc = (1-alpha)*N * 2 * b / (a*b - a*f + np.sqrt((a*b - a*f)**2 + 8*(1-alpha)*b*c*f))
@@ -331,8 +331,8 @@ def p_eos(beta, alpha, N, L, a, b, c, d, f):
     # zq = alpha * N / (b)
     # zc = (2*a*d + b*f + N*( (1-alpha)*(b**2 - 2*d) -     alpha*(a*b + f) )) / (2*b**2*c + 2*a**2*d - 4*c*d + 2*a*b*f + f**2)
     # zq = (2*b*c + a*f + N*(     alpha*(a**2 - 2*c) - (1-alpha)*(a*b + f) )) / (2*b**2*c + 2*a**2*d - 4*c*d + 2*a*b*f + f**2)
-    # zc = fugc(alpha, N, L, a, b, c, d, f)
-    # zq = fugq(alpha, N, L, a, b, c, d, f)
+    zc = fugc(alpha, N, L, a, b, c, d, f)
+    zq = fugq(alpha, N, L, a, b, c, d, f)
     
 
     return 1/(beta*KB*L*N) * np.log(a*zc + b*zq + c*zc**2 + d*zq**2 + f*zc*zq) #(a*zc + b*zq + 0.5*(2*c - a**2)*zc**2 + 0.5*(2*d - b**2)*zq**2 - (a*b + f)*zc*zq)
@@ -433,7 +433,7 @@ def save_ps():
                 for l, alpha in enumerate(alphas):
                     for m, n in enumerate(Ns):
                         try:
-                            ps[i, j, k, l, m] = p_virial(1/T,
+                            ps[i, j, k, l, m] = p_eos(1/T,
                                                         alpha,
                                                         n,
                                                         L,
@@ -713,7 +713,7 @@ def plot_virial_coeff():
     
     bs = virial_coeffs()
 
-    j = 0 # g index
+    j = -1 # g index
     #k = 5 # L index
     
     g = gs[j]
@@ -736,16 +736,16 @@ def plot_virial_coeff():
         plt.close(fig)
 
 
-# save_zs()
-# plot_zs()
-# #save_fugs_analytic()
-# #plot_mus_analytic()
+#save_zs()
+#plot_zs()
+#save_fugs_analytic()
+plot_mus_analytic()
 # # # save_fugs()
-# save_ps()
+save_ps()
 # # # # # save_ps_z()
-# plot_ps() 
-# plot_pL()
-plot_virial_coeff()
+plot_ps() 
+plot_pL()
+#plot_virial_coeff()
 
 # Zc1, Zc2, Zq1, Zq2, Zqc2 = load_zs()
 # print(Zq1[:, 3, 10])
